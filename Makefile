@@ -62,6 +62,7 @@ OBJS = controller.o \
 	player.o \
 	realtime.o \
 	rig.o \
+	rotary.o \
 	selector.o \
 	status.o \
 	thread.o \

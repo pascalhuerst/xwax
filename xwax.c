@@ -35,6 +35,7 @@
 #include "library.h"
 #include "oss.h"
 #include "realtime.h"
+#include "rotary.h"
 #include "thread.h"
 #include "rig.h"
 #include "timecoder.h"
@@ -54,6 +55,10 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*x))
 
+
+//#define WITH_ALSA
+
+
 char *banner = "xwax " VERSION \
     " (C) Copyright 2024 Mark Hills <mark@xwax.org>";
 
@@ -61,7 +66,7 @@ size_t ndeck;
 struct deck deck[3];
 
 static size_t nctl;
-static struct controller ctl[2];
+static struct controller ctl[1];
 
 static struct rt rt;
 
@@ -124,6 +129,9 @@ static void usage(FILE *fd)
     fprintf(fd, "MIDI control:\n"
       "  --dicer <device>    Novation Dicer\n\n");
 #endif
+
+    fprintf(fd, "Rotary control::\n"
+      "  --rotary <device>   Use a rotary encoder to navigate and load tracks\n\n");
 
     fprintf(fd,
       "The ordering of options is important. Options apply to subsequent\n"
@@ -634,6 +642,28 @@ int main(int argc, const char *argv[])
             argc -= 2;
 #endif
 
+        } else if (!strcmp(argv[0], "--rotary")) {
+            struct controller *c;
+            
+            if (nctl == sizeof ctl) {
+                fprintf(stderr, "Too many controllers; aborting.\n");
+                return -1;
+            }
+
+            c = &ctl[nctl];
+
+            if (argc < 2) {
+                fprintf(stderr, "Rotary requires an input device.\n");
+                return -1;
+            }
+
+            if (rotary_init(c, &rt, argv[1]) == -1)
+                return -1;
+
+            nctl++;
+
+            argv += 2;
+            argc -= 2;
         } else {
             fprintf(stderr, "'%s' argument is unknown; try -h.\n", argv[0]);
             return -1;
@@ -674,21 +704,46 @@ int main(int argc, const char *argv[])
 
 out_interface:
     interface_stop();
+    
+    printf("#### 0\n");
 out_rt:
     rt_stop(&rt);
+
+    printf("#### 1\n");
 
     for (n = 0; n < ndeck; n++)
         deck_clear(&deck[n]);
 
+    printf("#### 2\n");
+
     for (n = 0; n < nctl; n++)
         controller_clear(&ctl[n]);
 
+    printf("#### 3\n");
+
     timecoder_free_lookup();
+    
+    printf("#### 4\n");
+    
     library_clear(&library);
+    
+    printf("#### 5\n");
+    
     rt_clear(&rt);
+    
+    printf("#### 6\n");
+
     rig_clear();
+    
+    printf("#### 7\n");
+    
     library_global_clear();
+    
+    printf("#### 8\n");
+    
     thread_global_clear();
+
+    printf("#### 9\n");
 
     if (rc == EXIT_SUCCESS)
         fprintf(stderr, "Done.\n");

@@ -17,28 +17,12 @@
  *
  */
 
-#ifndef DEBUG_H
-#define DEBUG_H
+#ifndef ROTARY_H
+#define ROTARY_H
 
-#include <stdio.h>
+struct controller;
+struct rt;
 
-/*
- * Enable a specific debug message by prefixing with an underscore,
- * otherwise -DDEBUG to enable all within that particular compile.
- */
-
-#define _debug(...) { \
-    fprintf(stdout, "%s:%d: ", __FILE__, __LINE__); \
-    fprintf(stdout, __VA_ARGS__); \
-    fputc('\n', stdout); \
-}
-
-#ifdef DEBUG
-#define debug(...) _debug(__VA_ARGS__)
-#else
-#define debug(...)
-#endif
-
-#define not_implemented() abort()
+int rotary_init(struct controller *c, struct rt *rt, const char *hw);
 
 #endif

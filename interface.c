@@ -1566,6 +1566,17 @@ static bool handle_key(SDL_Keycode key, Uint16 mod)
 
         fprintf(stderr, "Meter scale increased to %d\n", meter_scale);
 
+    } else if (key == SDLK_RETURN) {
+        printf("Loading new selected track: %s\n", selector_current(sel)->pathname);
+        
+        struct deck *de;
+        struct record *re;
+        
+        de = &deck[0];
+        
+        re = selector_current(sel);
+        if (re != NULL)
+            deck_load(de, re);
     } else if (key >= SDLK_F1 && key <= SDLK_F12) {
         size_t d;
 
@@ -1743,8 +1754,24 @@ static bool handle_sdl_event(SDL_Event *event,
         break;
 
     case SDL_KEYDOWN:
+        printf("sym: %d mod: %d\n", event->key.keysym.sym, event->key.keysym.mod);
+        
         if (handle_key(event->key.keysym.sym, event->key.keysym.mod))
             sync_status_from_selector();
+    
+        break;
+    case SDL_MOUSEWHEEL:
+        printf("mouse wheel: %d\n", event->wheel.x);
+
+        if (event->wheel.x > 0) {
+            selector_up(&selector);
+        }
+        
+        if (event->wheel.x < 0) {
+            selector_down(&selector);
+        }
+
+        break;
     }
 
     return true;

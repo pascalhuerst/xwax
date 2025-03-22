@@ -70,12 +70,40 @@ void library_global_clear(void)
         abort();
 }
 
+/* Create a special "back" record for navigation */
+static struct record* create_back_record(void)
+{
+    struct record *x;
+
+    x = malloc(sizeof *x);
+    if (!x) {
+        perror("malloc");
+        return NULL;
+    }
+
+    x->pathname = strdup("[BACK]");
+    x->artist = "< BACK >";  // Changed from "!" to "< BACK >" for cleaner display
+    x->title = "< Select Crate >";
+    x->bpm = 0.0;
+    x->match = NULL;
+
+    return x;
+}
+
 void listing_init(struct listing *l)
 {
+    struct record *back;
+    
     index_init(&l->by_artist);
     index_init(&l->by_bpm);
     index_init(&l->by_order);
     event_init(&l->addition);
+
+    /* Add the back record at the top of the listing */
+    back = create_back_record();
+    if (back != NULL) {
+        listing_add(l, back);
+    }
 }
 
 void listing_clear(struct listing *l)
@@ -274,12 +302,9 @@ static int crate_cmp(const struct crate *a, const struct crate *b)
 
 struct record* listing_add(struct listing *l, struct record *r)
 {
-    struct record *x;
+    bool is_back = (r->pathname && strcmp(r->pathname, "[BACK]") == 0);
 
-    assert(r != NULL);
-
-    /* Do all the memory reservation up-front as we can't
-     * un-wind if it errors later */
+    /* Add to each index. If any fail, roll back */
 
     if (index_reserve(&l->by_artist, 1) == -1)
         return NULL;
@@ -288,15 +313,16 @@ struct record* listing_add(struct listing *l, struct record *r)
     if (index_reserve(&l->by_order, 1) == -1)
         return NULL;
 
-    x = index_insert(&l->by_artist, r, SORT_ARTIST);
-    assert(x != NULL);
-    if (x != r)
-        return x;
-
-    x = index_insert(&l->by_bpm, r, SORT_BPM);
-    assert(x == r);
-
-    index_add(&l->by_order, r);
+    /* Add to the ordered index first, as it cannot fail */
+    if (is_back) {
+        index_insert_at_position(&l->by_order, r, 0);
+        index_insert_at_position(&l->by_artist, r, 0);
+        index_insert_at_position(&l->by_bpm, r, 0);
+    } else {
+        index_add(&l->by_order, r);
+        index_insert(&l->by_artist, r, SORT_ARTIST);
+        index_insert(&l->by_bpm, r, SORT_BPM);
+    }
 
     fire(&l->addition, r);
     return r;

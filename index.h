@@ -66,6 +66,8 @@ int index_match(struct index *src, struct index *dest,
                 const struct match *match);
 struct record* index_insert(struct index *ls, struct record *item,
                             int sort);
+void index_insert_at_position(struct index *ls, struct record *item,
+                            size_t position);
 int index_reserve(struct index *i, unsigned int n);
 size_t index_find(struct index *ls, struct record *item, int sort);
 void index_debug(struct index *ls);

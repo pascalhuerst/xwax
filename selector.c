@@ -19,6 +19,9 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
+#include <libgen.h>
+#include <stdio.h>
 
 #include "selector.h"
 
@@ -234,7 +237,7 @@ void selector_init(struct selector *sel, struct library *lib)
     listbox_set_entries(&sel->crates, lib->crates);
 
     sel->toggled = false;
-    sel->sort = SORT_ARTIST;
+    sel->sort = SORT_PLAYLIST;  // Use playlist order by default to maintain original ordering
     sel->search[0] = '\0';
     sel->search_len = 0;
     sel->target = NULL;
@@ -469,4 +472,19 @@ void selector_search_refine(struct selector *sel, char key)
     listbox_set_entries(&sel->records, sel->view_index->entries);
     set_target(sel);
     notify(sel);
+}
+
+/* Handle selection of current item */
+void selector_submit(struct selector *sel)
+{
+    struct record *current = selector_current(sel);
+    
+    /* Handle back navigation */
+    if (current && strcmp(current->pathname, "[BACK]") == 0) {
+        fprintf(stderr, "Back entry selected, switching to crate view\n");
+        sel->toggled = false;  // Set toggled to false since we want to go back to specific crate
+        sel->sort = SORT_PLAYLIST;  // Use playlist order to maintain original ordering
+        listbox_to(&sel->crates, sel->toggle_back);  // Go back to the previously selected crate
+        do_crate_change(sel);  // Update the view for the selected crate
+    }
 }

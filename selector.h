@@ -65,6 +65,7 @@ void selector_next(struct selector *sel);
 void selector_toggle(struct selector *sel);
 void selector_toggle_order(struct selector *sel);
 void selector_rescan(struct selector *sel);
+void selector_submit(struct selector *sel);
 
 void selector_search_expand(struct selector *sel);
 void selector_search_refine(struct selector *sel, char key);

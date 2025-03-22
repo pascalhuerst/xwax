@@ -416,3 +416,25 @@ void index_debug(struct index *ls)
     for (n = 0; n < ls->entries; n++)
         fprintf(stderr, "%d: %s\n", n, ls->record[n]->pathname);
 }
+
+/*
+ * Insert a record at a specific position in the index
+ *
+ * Pre: at least one entry is reserved
+ * Pre: position is less than or equal to entries
+ */
+
+void index_insert_at_position(struct index *ls, struct record *item,
+                            size_t position)
+{
+    assert(has_space(ls));
+    assert(position <= ls->entries);
+
+    if (position < ls->entries) {
+        memmove(&ls->record[position + 1], &ls->record[position],
+                sizeof(struct record*) * (ls->entries - position));
+    }
+
+    ls->record[position] = item;
+    ls->entries++;
+}

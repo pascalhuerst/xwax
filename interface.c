@@ -30,9 +30,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-
-#include <SDL.h>
-#include <SDL_ttf.h>
+#include <sys/mman.h> /* mlockall() */
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
 #include "debug.h"
 #include "interface.h"
@@ -43,6 +43,10 @@
 #include "status.h"
 #include "timecoder.h"
 #include "xwax.h"
+#include "library.h"
+
+#define FOCUS_TRACKS 0
+#define FOCUS_CRATES 1
 
 /* Screen refresh time in milliseconds */
 
@@ -134,6 +138,9 @@
 #define REDRAW_DECKS       0x2
 #define REDRAW_STATUS      0x4
 #define REDRAW_LIBRARY     0x8
+
+/* Current focus state */
+static int current_focus = FOCUS_CRATES;
 
 /* Macro functions */
 
@@ -1120,28 +1127,6 @@ static void draw_decks(SDL_Surface *surface, const struct rect *rect,
 }
 
 /*
- * Draw the status bar
- */
-
-static void draw_status(SDL_Surface *sf, const struct rect *rect)
-{
-    SDL_Color fg, bg;
-
-    switch (status_level()) {
-    case STATUS_ALERT:
-    case STATUS_WARN:
-        fg = text_col;
-        bg = dim(alert_col, 2);
-        break;
-    default:
-        fg = detail_col;
-        bg = background_col;
-    }
-
-    draw_text_in_locale(sf, rect, status(), detail_font, fg, bg);
-}
-
-/*
  * Draw the search field which the user types into
  */
 
@@ -1417,8 +1402,8 @@ static SDL_Rect to_sdl_rect(struct rect ours)
 
 static void draw(SDL_Surface *surface, unsigned int redraw)
 {
-    SDL_Rect areas[3], *damaged = areas;
-    struct rect whole, rworkspace, rplayers, rlibrary, rstatus, rtmp;
+    SDL_Rect areas[2], *damaged = areas;
+    struct rect whole, rworkspace, rplayers, rlibrary;
 
     /* Split the display into the various areas. If an area is too
      * small, abandon any actions to happen in that area. */
@@ -1426,15 +1411,9 @@ static void draw(SDL_Surface *surface, unsigned int redraw)
     whole = rect(0, 0, surface->w, surface->h, scale);
     rworkspace = shrink(rect(0, 0, surface->w, surface->h, scale), BORDER);
 
-    split(rworkspace, from_bottom(STATUS_HEIGHT, SPACER), &rtmp, &rstatus);
-    if (rtmp.h < 128 || rtmp.w < 0) {
-        rtmp = rworkspace;
-        redraw &= ~REDRAW_STATUS;
-    }
-
-    split(rtmp, from_top(PLAYER_HEIGHT, SPACER), &rplayers, &rlibrary);
+    split(rworkspace, from_top(PLAYER_HEIGHT, SPACER), &rplayers, &rlibrary);
     if (rlibrary.h < LIBRARY_MIN_HEIGHT || rlibrary.w < LIBRARY_MIN_WIDTH) {
-        rplayers = rtmp;
+        rplayers = rworkspace;
         redraw &= ~REDRAW_LIBRARY;
     }
 
@@ -1452,11 +1431,6 @@ static void draw(SDL_Surface *surface, unsigned int redraw)
     if (redraw & REDRAW_LIBRARY) {
         draw_library(surface, &rlibrary, &selector);
         *damaged++ = to_sdl_rect(rlibrary);
-    }
-
-    if (redraw & REDRAW_STATUS) {
-        draw_status(surface, &rstatus);
-        *damaged++ = to_sdl_rect(rstatus);
     }
 
     if (redraw & REDRAW_DECKS) {
@@ -1516,27 +1490,43 @@ static bool handle_key(SDL_Keycode key, Uint16 mod)
         return true;
 
     } else if (key == SDLK_UP) {
-        selector_up(sel);
+        if (current_focus == FOCUS_TRACKS) {
+            selector_up(sel);
+        }
         return true;
 
     } else if (key == SDLK_DOWN) {
-        selector_down(sel);
+        if (current_focus == FOCUS_TRACKS) {
+            selector_down(sel);
+        }
         return true;
 
     } else if (key == SDLK_PAGEUP) {
-        selector_page_up(sel);
+        if (current_focus == FOCUS_TRACKS) {
+            selector_page_up(sel);
+        }
         return true;
 
     } else if (key == SDLK_PAGEDOWN) {
-        selector_page_down(sel);
+        if (current_focus == FOCUS_TRACKS) {
+            selector_page_down(sel);
+        }
         return true;
 
     } else if (key == SDLK_LEFT) {
-        selector_prev(sel);
+        if (current_focus == FOCUS_TRACKS) {
+            current_focus = FOCUS_CRATES;
+        } else {
+            selector_prev(sel);
+        }
         return true;
 
     } else if (key == SDLK_RIGHT) {
-        selector_next(sel);
+        if (current_focus == FOCUS_CRATES) {
+            current_focus = FOCUS_TRACKS;
+        } else {
+            selector_next(sel);
+        }
         return true;
 
     } else if (key == SDLK_TAB) {
@@ -1567,16 +1557,27 @@ static bool handle_key(SDL_Keycode key, Uint16 mod)
         fprintf(stderr, "Meter scale increased to %d\n", meter_scale);
 
     } else if (key == SDLK_RETURN) {
-        printf("Loading new selected track: %s\n", selector_current(sel)->pathname);
-        
         struct deck *de;
         struct record *re;
         
-        de = &deck[0];
+        if (current_focus == FOCUS_CRATES) {
+            // When pressing Enter on a crate, switch focus to tracks
+            current_focus = FOCUS_TRACKS;
+            return true;
+        }
         
-        re = selector_current(sel);
-        if (re != NULL)
-            deck_load(de, re);
+        re = selector_current(&selector);
+        
+        if (re != NULL) {
+            if (strcmp(re->pathname, "[BACK]") == 0) {
+                fprintf(stderr, "Back entry selected, switching to crate view\n");
+                current_focus = FOCUS_CRATES;
+                selector_submit(&selector);
+            } else {
+                de = &deck[0];
+                deck_load(de, re);
+            }
+        }
     } else if (key >= SDLK_F1 && key <= SDLK_F12) {
         size_t d;
 
@@ -1763,14 +1764,22 @@ static bool handle_sdl_event(SDL_Event *event,
     case SDL_MOUSEWHEEL:
         printf("mouse wheel: %d\n", event->wheel.x);
 
-        if (event->wheel.x > 0) {
-            selector_up(&selector);
+        if (current_focus == FOCUS_CRATES) {
+            if (event->wheel.x > 0) {
+                selector_prev(&selector);
+            }
+            if (event->wheel.x < 0) {
+                selector_next(&selector);
+            }
+        } else {
+            if (event->wheel.x > 0) {
+                selector_up(&selector);
+            }
+            if (event->wheel.x < 0) {
+                selector_down(&selector);
+            }
         }
-        
-        if (event->wheel.x < 0) {
-            selector_down(&selector);
-        }
-
+        sync_status_from_selector();
         break;
     }
 
@@ -2013,7 +2022,7 @@ int interface_start(struct library *lib, const char *geo, bool decor)
     selector_init(&selector, lib);
     watch(&on_status, &status_changed, defer_status_redraw);
     watch(&on_selector, &selector.changed, defer_selector_redraw);
-    status_set(STATUS_VERBOSE, banner);
+    status_set(STATUS_VERBOSE, "");
 
     fprintf(stderr, "Launching interface thread...\n");
 

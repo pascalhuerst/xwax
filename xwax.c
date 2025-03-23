@@ -40,6 +40,7 @@
 #include "timecoder.h"
 #include "track.h"
 #include "xwax.h"
+#include "watcher.h"
 
 #define DEFAULT_OSS_BUFFERS 8
 #define DEFAULT_OSS_FRAGMENT 7
@@ -72,69 +73,20 @@ static struct timecode_def *timecode;
 
 static void usage(FILE *fd)
 {
-    fprintf(fd, "Usage: xwax [<options>]\n\n");
-
-    fprintf(fd, "Program-wide options:\n"
-      "  --lock-ram          Lock real-time memory into RAM\n"
-      "  --rtprio <n>        Real-time priority (0 for no priority, default %d)\n"
-      "  --geometry <s>      Set display geometry (see man page)\n"
-      "  --no-decor          Request a window with no decorations\n"
-      "  -h, --help          Display this message to stdout and exit\n\n",
-      DEFAULT_PRIORITY);
-
-    fprintf(fd, "Music library options:\n"
-      "  -l, --crate <path>  Location to scan for audio tracks\n"
-      "  --scan <program>    Library scanner (default '%s')\n\n",
+    fprintf(fd, "Usage: xwax [<parameters>]\n\n"
+      "  -l <path>        Location to scan for audio tracks\n"
+      "  -s <program>     Scan script (default '%s')\n"
+      "  --watch-dir <dir> Watch directory for changes\n"
+      "  -t <name>        Timecode name\n"
+      "  -33             Use 33.3rpm playback (default)\n"
+      "  -45             Use 45rpm playback\n"
+      "  -c              Protect against certain operations while playing\n"
+      "  -u              Mono audio output\n"
+      "  -q              Quiet mode\n"
+      "  -g              Graphical display\n"
+      "  -k              Allow keyboard control\n"
+      "  -h              Display this help message\n",
       DEFAULT_SCANNER);
-
-    fprintf(fd, "Deck options:\n"
-      "  --timecode <name>   Timecode name\n"
-      "  --33                Use timecode at 33.3RPM (default)\n"
-      "  --45                Use timecode at 45RPM\n"
-      "  --[no-]protect      Protect against certain operations while playing\n"
-      "  --line              Line level signal (default)\n"
-      "  --phono             Tolerate cartridge level signal ('software pre-amp')\n"
-      "  --import <program>  Track importer (default '%s')\n"
-      "  --dummy             Build a dummy deck with no audio device\n\n",
-      DEFAULT_IMPORTER);
-
-#ifdef WITH_OSS
-    fprintf(fd, "OSS device options:\n"
-      "  --oss <device>      Build a deck connected to OSS audio device\n"
-      "  --rate <hz>         Sample rate (default 48000Hz)\n"
-      "  --oss-buffers <n>   Number of buffers (default %d)\n"
-      "  --oss-fragment <n>  Buffer size to request (2^n bytes, default %d)\n\n",
-      DEFAULT_OSS_BUFFERS, DEFAULT_OSS_FRAGMENT);
-#endif
-
-#ifdef WITH_ALSA
-    fprintf(fd, "ALSA device options:\n"
-      "  --alsa <device>     Build a deck connected to ALSA audio device\n"
-      "  --rate <hz>         Sample rate (default is automatic)\n"
-      "  --buffer <n>        Buffer size (default %d samples)\n\n",
-      DEFAULT_ALSA_BUFFER);
-#endif
-
-#ifdef WITH_JACK
-    fprintf(fd, "JACK device options:\n"
-      "  --jack <name>       Create a JACK deck with the given name\n\n");
-#endif
-
-#ifdef WITH_ALSA
-    fprintf(fd, "MIDI control:\n"
-      "  --dicer <device>    Novation Dicer\n\n");
-#endif
-
-    fprintf(fd,
-      "The ordering of options is important. Options apply to subsequent\n"
-      "music libraries or decks, which can be given multiple times. See the\n"
-      "manual for details.\n\n"
-      "Available timecodes (for use with -t):\n"
-      "  serato_2a (default), serato_2b, serato_cd,\n"
-      "  pioneer_a, pioneer_b,\n"
-      "  traktor_a, traktor_b,\n"
-      "  mixvibes_v2, mixvibes_7inch\n\n"
-      "See the xwax(1) man page for full information and examples.\n");
 }
 
 static void deprecated(const char **arg, const char *old, const char *new)
@@ -191,7 +143,7 @@ static int commit_deck(void)
 int main(int argc, const char *argv[])
 {
     int rc = -1, n, priority;
-    const char *scanner, *geo;
+    const char *scanner, *geo, *watch_dir;
     char *endptr;
     bool use_mlock, decor;
 
@@ -246,6 +198,7 @@ int main(int argc, const char *argv[])
     protect = false;
     phono = false;
     use_mlock = false;
+    watch_dir = NULL;
 
 #if defined WITH_OSS || WITH_ALSA
     rate = 0; /* automatic */
@@ -634,6 +587,16 @@ int main(int argc, const char *argv[])
             argc -= 2;
 #endif
 
+        } else if (!strcmp(argv[0], "--watch-dir")) {
+            if (argc < 2) {
+                fprintf(stderr, "--watch-dir requires a directory path argument.\n");
+                return -1;
+            }
+
+            watch_dir = argv[1];
+            argv += 2;
+            argc -= 2;
+
         } else {
             fprintf(stderr, "'%s' argument is unknown; try -h.\n", argv[0]);
             return -1;
@@ -666,6 +629,18 @@ int main(int argc, const char *argv[])
     if (interface_start(&library, geo, decor) == -1)
         goto out_rt;
 
+    /* Initialize the watcher if a directory was specified */
+    if (watch_dir) {
+        fprintf(stderr, "Initializing directory watcher for '%s'...\n", watch_dir);
+        if (watcher_init(watch_dir, &library, scanner) == -1) {
+            fprintf(stderr, "Failed to initialize directory watcher\n");
+            goto out_interface;
+        }
+        fprintf(stderr, "Directory watcher initialized successfully\n");
+    } else {
+        fprintf(stderr, "No watch directory specified, skipping watcher initialization\n");
+    }
+
     if (rig_main() == -1)
         goto out_interface;
 
@@ -689,6 +664,7 @@ out_rt:
     rig_clear();
     library_global_clear();
     thread_global_clear();
+    watcher_clear();
 
     if (rc == EXIT_SUCCESS)
         fprintf(stderr, "Done.\n");

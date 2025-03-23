@@ -67,6 +67,7 @@ OBJS = controller.o \
 	thread.o \
 	timecoder.o \
 	track.o \
+	watcher.o \
 	xwax.o
 DEVICE_CPPFLAGS =
 DEVICE_LIBS =

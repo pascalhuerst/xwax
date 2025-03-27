@@ -106,6 +106,8 @@ void deck_load(struct deck *d, struct record *record)
 
     d->record = record;
     player_set_track(&d->player, t); /* passes reference */
+    player_set_timecode_control(&d->player, true);
+    player_seek_to(&d->player, 0);
 }
 
 void deck_recue(struct deck *d)

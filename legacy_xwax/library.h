@@ -52,7 +52,7 @@ struct crate {
 
 struct library {
     struct listing storage; /* owns the record pointers */
-    struct crate all, **crate;
+    struct crate **crate;
     size_t crates;
 };
 
@@ -70,5 +70,6 @@ struct record* get_record(char *line);
 
 int library_import(struct library *lib, const char *scan, const char *path);
 int library_rescan(struct library *l, struct crate *c);
+int library_remove_by_path(struct library *lib, const char *path);
 
 #endif

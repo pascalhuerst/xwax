@@ -1,0 +1,45 @@
+[package]
+name = "neowax"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lazy_static = "1.4.0"
+egui = "0.24.1"
+eframe = "0.24.1"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+alsa = "0.9.1"
+anyhow = "1.0.97"
+libc = "0.2.171"
+ringbuf = "0.4.8"
+symphonia = { version = "0.5.3", features = ["mp3", "wav", "flac", "aac", "isomp4", "ogg", "vorbis"] }
+num-traits = "0.2.19"
+byteorder = "1.5.0"
+clap = { version = "4.5.1", features = ["derive"] }
+ctrlc = "3.4"
+id3 = "1.8.0"
+
+[[bin]]
+name = "neowax"
+path = "src/bin/neowax.rs"
+
+[[bin]]
+name = "timecode-reader"
+path = "src/bin/timecode_reader.rs"
+
+[[bin]]
+name = "neowax-ui"
+path = "src/bin/neowax_ui.rs"
+
+[[bin]]
+name = "audio-passthru"
+path = "src/bin/audio_passthru.rs"
+
+[[bin]]
+name = "media-decoder"
+path = "src/bin/media_decoder.rs"
+
+[[bin]]
+name = "media-player"
+path = "src/bin/media_player.rs"

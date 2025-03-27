@@ -44,6 +44,7 @@
 #include "timecoder.h"
 #include "xwax.h"
 #include "library.h"
+#include "colors.h"
 
 #define FOCUS_TRACKS 0
 #define FOCUS_CRATES 1
@@ -101,7 +102,6 @@
 
 #define MAX_METER_SCALE 11
 
-#define SEARCH_HEIGHT (FONT_SPACE)
 #define STATUS_HEIGHT (DETAIL_FONT_SPACE)
 
 #define BPM_WIDTH 32
@@ -164,18 +164,6 @@ static const char *font_dirs[] = {
 
 static TTF_Font *clock_font, *deci_font, *detail_font,
     *font, *em_font, *big_font;
-
-static SDL_Color background_col = {0, 0, 0, 255},
-    text_col = {224, 224, 224, 255},
-    alert_col = {192, 64, 0, 255},
-    ok_col = {32, 128, 3, 255},
-    elapsed_col = {0, 32, 255, 255},
-    cursor_col = {192, 0, 0, 255},
-    selected_col = {0, 48, 64, 255},
-    detail_col = {128, 128, 128, 255},
-    needle_col = {255, 255, 255, 255},
-    artist_col = {16, 64, 0, 255},
-    bpm_col = {64, 16, 0, 255};
 
 static unsigned short *spinner_angle, spinner_size;
 
@@ -395,7 +383,7 @@ static void clear_fonts(void)
     TTF_CloseFont(detail_font);
 }
 
-static Uint32 palette(SDL_Surface *sf, SDL_Color *col)
+static Uint32 palette(SDL_Surface *sf, const SDL_Color *col)
 {
     return SDL_MapRGB(sf->format, col->r, col->g, col->b);
 }
@@ -628,7 +616,7 @@ static void draw_bpm(SDL_Surface *surface, const struct rect *rect, double bpm,
     /* Safety catch against bad BPM values, NaN, infinity etc. */
 
     if (bpm < min || bpm > max) {
-        draw_token(surface, rect, buf, detail_col, bg_col, bg_col);
+        draw_token(surface, rect, buf, COLOR_DETAIL, bg_col, bg_col);
         return;
     }
 
@@ -639,7 +627,7 @@ static void draw_bpm(SDL_Surface *surface, const struct rect *rect, double bpm,
     f -= floor(f);
     h = f * 360.0; /* degrees */
 
-    draw_token(surface, rect, buf, text_col, hsv(h, 1.0, 0.3), bg_col);
+    draw_token(surface, rect, buf, COLOR_TEXT, hsv(h, 1.0, 0.3), bg_col);
 }
 
 /*
@@ -666,20 +654,20 @@ static void draw_record(SDL_Surface *surface, const struct rect *rect,
 
     split(*rect, from_top(BIG_FONT_SPACE, 0), &artist, &title);
     draw_text_in_locale(surface, &artist, record->artist,
-                        big_font, text_col, background_col);
+                        big_font, COLOR_TEXT, COLOR_BACKGROUND);
 
     /* Layout changes slightly if BPM is known */
 
     if (show_bpm(record->bpm)) {
         split(title, from_left(BPM_WIDTH, 0), &left, &right);
-        draw_bpm(surface, &left, record->bpm, background_col);
+        draw_bpm(surface, &left, record->bpm, COLOR_BACKGROUND);
 
         split(right, from_left(HALF_SPACER, 0), &left, &title);
-        draw_rect(surface, &left, background_col);
+        draw_rect(surface, &left, COLOR_BACKGROUND);
     }
 
     draw_text_in_locale(surface, &title, record->title,
-                        font, text_col, background_col);
+                        font, COLOR_TEXT, COLOR_BACKGROUND);
 }
 
 /*
@@ -695,12 +683,12 @@ static void draw_clock(SDL_Surface *surface, const struct rect *rect, int t,
 
     time_to_clock(hms, deci, t);
 
-    v = draw_text(surface, rect, hms, clock_font, col, background_col);
+    v = draw_text(surface, rect, hms, clock_font, col, COLOR_BACKGROUND);
 
     split(*rect, pixels(from_left(v, 0)), NULL, &sr);
     track_baseline(&sr, clock_font, &sr, deci_font);
 
-    draw_text(surface, &sr, deci, deci_font, col, background_col);
+    draw_text(surface, &sr, deci, deci_font, col, COLOR_BACKGROUND);
 }
 
 /*
@@ -758,9 +746,9 @@ static void draw_spinner(SDL_Surface *surface, const struct rect *rect,
     rangle = (int)(player_get_position(pl) * 1024 * rps) % 1024;
 
     if (elapsed < 0 || remain < 0)
-        col = alert_col;
+        col = COLOR_ALERT;
     else
-        col = ok_col;
+        col = COLOR_OK;
 
     for (r = 0; r < spinner_size; r++) {
 
@@ -809,18 +797,18 @@ static void draw_deck_clocks(SDL_Surface *surface, const struct rect *rect,
     remain = player_get_remain(pl) * 1000;
 
     if (elapse < 0)
-        col = alert_col;
+        col = COLOR_ALERT;
     else if (remain > 0)
-        col = ok_col;
+        col = COLOR_OK;
     else
-        col = text_col;
+        col = COLOR_TEXT;
 
     draw_clock(surface, &upper, elapse, col);
 
     if (remain <= 0)
-        col = alert_col;
+        col = COLOR_ALERT;
     else
-        col = text_col;
+        col = COLOR_TEXT;
 
     if (track_is_importing(track))
         col = dim(col, 2);
@@ -869,16 +857,16 @@ static void draw_overview(SDL_Surface *surface, const struct rect *rect,
         /* Choose a base colour to display in */
 
         if (!tr->length) {
-            col = background_col;
+            col = COLOR_BACKGROUND;
             fade = 0;
         } else if (c == current_position) {
-            col = needle_col;
+            col = COLOR_NEEDLE;
             fade = 1;
         } else if (position > tr->length - tr->rate * METER_WARNING_TIME) {
-            col = alert_col;
+            col = COLOR_ALERT;
             fade = 3;
         } else {
-            col = elapsed_col;
+            col = COLOR_ELAPSED;
             fade = 3;
         }
 
@@ -952,10 +940,10 @@ static void draw_closeup(SDL_Surface *surface, const struct rect *rect,
         /* Select the appropriate colour */
 
         if (c == w / 2) {
-            col = needle_col;
+            col = COLOR_NEEDLE;
             fade = 1;
         } else {
-            col = elapsed_col;
+            col = COLOR_ELAPSED;
             fade = 3;
         }
 
@@ -1067,7 +1055,7 @@ static void draw_deck_status(SDL_Surface *surface,
             pl->recalibrate ? "RCAL  " : "",
             deck_is_locked(deck) ? "LOCK  " : "");
 
-    draw_text(surface, rect, buf, detail_font, detail_col, background_col);
+    draw_text(surface, rect, buf, detail_font, COLOR_DETAIL, COLOR_BACKGROUND);
 }
 
 /*
@@ -1146,14 +1134,14 @@ static void draw_search(SDL_Surface *surface, const struct rect *rect,
     else
         buf = NULL;
 
-    s = draw_text(surface, &rtext, buf, font, text_col, background_col);
+    s = draw_text(surface, &rtext, buf, font, COLOR_TEXT, COLOR_BACKGROUND);
 
     cursor.x = rtext.x + s;
     cursor.y = rtext.y;
     cursor.w = CURSOR_WIDTH * rect->scale; /* FIXME: use proper UI funcs */
     cursor.h = rtext.h;
 
-    SDL_FillRect(surface, &cursor, palette(surface, &cursor_col));
+    SDL_FillRect(surface, &cursor, palette(surface, &COLOR_CURSOR));
 
     if (sel->view_index->entries > 1)
         sprintf(cm, "%zd matches", sel->view_index->entries);
@@ -1165,7 +1153,7 @@ static void draw_search(SDL_Surface *surface, const struct rect *rect,
     rtext.x += s + CURSOR_WIDTH + SPACER;
     rtext.w -= s + CURSOR_WIDTH + SPACER;
 
-    draw_text(surface, &rtext, cm, em_font, detail_col, background_col);
+    draw_text(surface, &rtext, cm, em_font, COLOR_DETAIL, COLOR_BACKGROUND);
 }
 
 /*
@@ -1179,7 +1167,7 @@ static void draw_scroll_bar(SDL_Surface *surface, const struct rect *rect,
     SDL_Rect box;
     SDL_Color bg;
 
-    bg = dim(selected_col, 1);
+    bg = dim(COLOR_SELECTED, 1);
 
     box.x = rect->x;
     box.y = rect->y;
@@ -1192,7 +1180,7 @@ static void draw_scroll_bar(SDL_Surface *surface, const struct rect *rect,
         box.y = rect->y + rect->h * scroll->offset / scroll->entries;
         box.w = rect->w;
         box.h = rect->h * MIN(scroll->lines, scroll->entries) / scroll->entries;
-        SDL_FillRect(surface, &box, palette(surface, &selected_col));
+        SDL_FillRect(surface, &box, palette(surface, &COLOR_SELECTED));
     }
 }
 
@@ -1239,7 +1227,7 @@ static void draw_listbox(const struct listbox *lb, SDL_Surface *surface,
         draw(context, surface, line, entry, selected);
     }
 
-    draw_rect(surface, &remain, background_col);
+    draw_rect(surface, &remain, COLOR_BACKGROUND);
 }
 
 static void draw_crate_row(const void *context,
@@ -1254,13 +1242,13 @@ static void draw_crate_row(const void *context,
     crate = selector->library->crate[entry];
 
     if (crate->is_fixed)
-        col = detail_col;
+        col = COLOR_DETAIL;
     else
-        col = text_col;
+        col = COLOR_TEXT;
 
     if (!selected) {
         draw_text_in_locale(surface, &rect, crate->name,
-                            font, col, background_col);
+                            font, col, COLOR_BACKGROUND);
         return;
     }
 
@@ -1268,15 +1256,15 @@ static void draw_crate_row(const void *context,
 
     switch (selector->sort) {
     case SORT_ARTIST:
-        draw_token(surface, &right, "ART", text_col, artist_col, selected_col);
+        draw_token(surface, &right, "ART", COLOR_TEXT, COLOR_ARTIST, COLOR_SELECTED);
         break;
 
     case SORT_BPM:
-        draw_token(surface, &right, "BPM", text_col, bpm_col, selected_col);
+        draw_token(surface, &right, "BPM", COLOR_TEXT, COLOR_BPM, COLOR_SELECTED);
         break;
 
     case SORT_PLAYLIST:
-        draw_token(surface, &right, "PLS", text_col, selected_col, selected_col);
+        draw_token(surface, &right, "PLS", COLOR_TEXT, COLOR_SELECTED, COLOR_SELECTED);
         break;
 
     default:
@@ -1285,11 +1273,11 @@ static void draw_crate_row(const void *context,
 
     if (crate->is_busy) {
         split(left, from_right(25, 0), &left, &right);
-        draw_token(surface, &right, "BUSY", text_col,
-                   dim(alert_col, 2), selected_col);
+        draw_token(surface, &right, "BUSY", COLOR_TEXT,
+                   dim(COLOR_ALERT, 2), COLOR_SELECTED);
     }
 
-    draw_text_in_locale(surface, &left, crate->name, font, col, selected_col);
+    draw_text_in_locale(surface, &left, crate->name, font, col, COLOR_SELECTED);
 }
 
 /*
@@ -1299,6 +1287,12 @@ static void draw_crate_row(const void *context,
 static void draw_crates(SDL_Surface *surface, const struct rect rect,
                         const struct selector *x)
 {
+    if (x->library->crates == 0) {
+        struct rect msg;
+        split(rect, from_top(FONT_SPACE, 0), &msg, NULL);
+        draw_text(surface, &msg, "No media mounted", font, COLOR_DETAIL, COLOR_BACKGROUND);
+        return;
+    }
     draw_listbox(&x->crates, surface, rect, x, draw_crate_row);
 }
 
@@ -1313,9 +1307,9 @@ static void draw_record_row(const void *context,
     SDL_Color col;
 
     if (selected)
-        col = selected_col;
+        col = COLOR_SELECTED;
     else
-        col = background_col;
+        col = COLOR_BACKGROUND;
 
     width = rect.w / 2;
     if (width > RESULTS_ARTIST_WIDTH)
@@ -1330,11 +1324,11 @@ static void draw_record_row(const void *context,
     draw_rect(surface, &left, col);
 
     split(right, from_left(width, 0), &left, &right);
-    draw_text_in_locale(surface, &left, record->artist, font, text_col, col);
+    draw_text_in_locale(surface, &left, record->artist, font, COLOR_TEXT, col);
 
     split(right, from_left(SPACER, 0), &left, &right);
     draw_rect(surface, &left, col);
-    draw_text_in_locale(surface, &right, record->title, font, text_col, col);
+    draw_text_in_locale(surface, &right, record->title, font, COLOR_TEXT, col);
 }
 
 /*
@@ -1356,25 +1350,21 @@ static void draw_index(SDL_Surface *surface, const struct rect rect,
 static void draw_library(SDL_Surface *surface, const struct rect *rect,
                          struct selector *sel)
 {
-    struct rect rsearch, rlists, rcrates, rrecords;
+    struct rect rlists, rcrates, rrecords;
     unsigned int rows;
 
-    split(*rect, from_top(SEARCH_HEIGHT, SPACER), &rsearch, &rlists);
+    rlists = *rect;  // Use full height without search field
 
     rows = count_rows(rlists, FONT_SPACE);
     if (rows == 0) {
-
         /* Hide the selector: draw nothing, and make it a 'virtual'
          * one row selector. This is enough to use it from the search
          * field and status only */
 
-        draw_search(surface, rect, sel);
         selector_set_lines(sel, 1);
-
         return;
     }
 
-    draw_search(surface, &rsearch, sel);
     selector_set_lines(sel, rows);
 
     split(rlists, columns(0, 4, SPACER), &rcrates, &rrecords);
@@ -1426,7 +1416,7 @@ static void draw(SDL_Surface *surface, unsigned int redraw)
     LOCK(surface);
 
     if (redraw & REDRAW_BACKGROUND)
-        draw_rect(surface, &whole, background_col);
+        draw_rect(surface, &whole, COLOR_BACKGROUND);
 
     if (redraw & REDRAW_LIBRARY) {
         draw_library(surface, &rlibrary, &selector);
@@ -1573,6 +1563,12 @@ static bool handle_key(SDL_Keycode key, Uint16 mod)
                 fprintf(stderr, "Back entry selected, switching to crate view\n");
                 current_focus = FOCUS_CRATES;
                 selector_submit(&selector);
+            } else if (strcmp(re->pathname, "[RESCAN]") == 0) {
+                fprintf(stderr, "Rescan triggered\n");
+                struct crate *c = current_crate(&selector);
+                if (c != NULL) {
+                    library_rescan(selector.library, c);
+                }
             } else {
                 de = &deck[0];
                 deck_load(de, re);

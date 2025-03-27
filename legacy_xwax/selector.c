@@ -93,7 +93,7 @@ static void hunt_target(struct selector *s)
  * Return: the currently selected crate
  */
 
-static struct crate* current_crate(struct selector *sel)
+struct crate* current_crate(struct selector *sel)
 {
     int n;
 
@@ -226,14 +226,11 @@ static void watch_crate(struct selector *s, struct crate *c)
 
 void selector_init(struct selector *sel, struct library *lib)
 {
-    struct crate *c;
-
     sel->library = lib;
 
     listbox_init(&sel->records);
     listbox_init(&sel->crates);
 
-    assert(lib->crates > 0);
     listbox_set_entries(&sel->crates, lib->crates);
 
     sel->toggled = false;
@@ -247,10 +244,15 @@ void selector_init(struct selector *sel, struct library *lib)
     sel->view_index = &sel->index_a;
     sel->swap_index = &sel->index_b;
 
-    c = current_crate(sel);
-    watch_crate(sel, c);
-
-    (void)index_copy(initial(sel), sel->view_index);
+    if (lib->crates > 0) {
+        struct crate *c = current_crate(sel);
+        watch_crate(sel, c);
+        (void)index_copy(initial(sel), sel->view_index);
+    } else {
+        // No crates yet, initialize with empty view
+        sel->view_index->entries = 0;
+    }
+    
     listbox_set_entries(&sel->records, sel->view_index->entries);
 
     event_init(&sel->changed);

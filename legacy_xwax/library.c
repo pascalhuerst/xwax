@@ -31,8 +31,6 @@
 #include "excrate.h"
 #include "external.h"
 
-#define CRATE_ALL "All records"
-
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*x))
 
 /* The locale used for searches */
@@ -90,9 +88,29 @@ static struct record* create_back_record(void)
     return x;
 }
 
+/* Create a special "rescan" record for triggering rescan */
+static struct record* create_rescan_record(void)
+{
+    struct record *x;
+
+    x = malloc(sizeof *x);
+    if (!x) {
+        perror("malloc");
+        return NULL;
+    }
+
+    x->pathname = strdup("[RESCAN]");
+    x->artist = "⟳";  // Unicode refresh symbol
+    x->title = "Trigger Rescan";
+    x->bpm = 0.0;
+    x->match = NULL;
+
+    return x;
+}
+
 void listing_init(struct listing *l)
 {
-    struct record *back;
+    struct record *back, *rescan;
     
     index_init(&l->by_artist);
     index_init(&l->by_bpm);
@@ -103,6 +121,12 @@ void listing_init(struct listing *l)
     back = create_back_record();
     if (back != NULL) {
         listing_add(l, back);
+    }
+
+    /* Add the rescan record at the top of the listing */
+    rescan = create_rescan_record();
+    if (rescan != NULL) {
+        listing_add(l, rescan);
     }
 }
 
@@ -159,25 +183,6 @@ static void propagate_completion(struct observer *o, void *x)
     struct crate *c = container_of(o, struct crate, on_completion);
     c->is_busy = false;
     fire(&c->activity, NULL);
-}
-
-/*
- * Initialise the crate which shows the entire library content
- *
- * Return: 0 on success, -1 on memory allocation failure
- */
-
-static int crate_init_all(struct library *l, struct crate *c, const char *name)
-{
-    if (crate_init(c, name) == -1)
-        return -1;
-
-    c->is_fixed = true;
-    c->listing = &l->storage;
-    watch(&c->on_addition, &c->listing->addition, propagate_addition);
-    c->excrate = NULL;
-
-    return 0;
 }
 
 /*
@@ -403,14 +408,6 @@ int library_init(struct library *li)
     li->crates = 0;
     listing_init(&li->storage);
 
-    if (crate_init_all(li, &li->all, CRATE_ALL) == -1)
-        return -1;
-
-    if (add_crate(li, &li->all) == -1) {
-        crate_clear(&li->all);
-        return -1;
-    }
-
     return 0;
 }
 
@@ -444,7 +441,7 @@ void library_clear(struct library *li)
 
     /* Clear crates */
 
-    for (n = 1; n < li->crates; n++) { /* skip the 'all' crate */
+    for (n = 0; n < li->crates; n++) {
         struct crate *crate;
 
         crate = li->crate[n];
@@ -453,7 +450,6 @@ void library_clear(struct library *li)
     }
     free(li->crate);
 
-    crate_clear(&li->all);
     listing_clear(&li->storage);
 }
 
@@ -616,12 +612,9 @@ bad:
 }
 
 /*
- * Scan a record library
+ * Import a new crate into the library
  *
- * Launch the given scan script and pass it the path argument.
- * Parse the results into the crates.
- *
- * Return: 0 on success, -1 on fatal error (may leak)
+ * Return: 0 on success, -1 on error
  */
 
 int library_import(struct library *li, const char *scan, const char *path)
@@ -652,7 +645,6 @@ fail_crate:
 fail:
     free(crate);
     return -1;
-
 }
 
 /*
@@ -670,4 +662,39 @@ int library_rescan(struct library *l, struct crate *c)
         return -1;
     else
         return crate_rescan(c, l);
+}
+
+/*
+ * Remove a crate from the library by its path
+ *
+ * Return: 0 on success, -1 if crate not found
+ */
+int library_remove_by_path(struct library *lib, const char *path)
+{
+    int i;
+    for (i = 0; i < lib->crates; i++) {
+        if (lib->crate[i]->path && strcmp(lib->crate[i]->path, path) == 0) {
+            struct crate *crate = lib->crate[i];
+            
+            // Move remaining crates up
+            for (int j = i; j < lib->crates - 1; j++) {
+                lib->crate[j] = lib->crate[j + 1];
+            }
+            
+            lib->crates--;
+            
+            // If this was the last crate, free the array
+            if (lib->crates == 0) {
+                free(lib->crate);
+                lib->crate = NULL;
+            }
+            
+            // Clear and free the removed crate
+            crate_clear(crate);
+            free(crate);
+            
+            return 0;
+        }
+    }
+    return -1;
 }

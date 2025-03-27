@@ -47,7 +47,8 @@ LDFLAGS ?= -O3
 
 # Core objects and libraries
 
-OBJS = controller.o \
+OBJS = colors.o \
+	controller.o \
 	cues.o \
 	deck.o \
 	device.o \

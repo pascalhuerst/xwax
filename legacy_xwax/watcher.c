@@ -175,6 +175,13 @@ static int add_watch_recursive(const char *path) {
     return 0;
 }
 
+static void handle_device_removal(const char *path) {
+    fprintf(stderr, "Device removed: %s\n", path);
+    if (library_remove_by_path(library, path) == 0) {
+        fprintf(stderr, "Removed crate for path: %s\n", path);
+    }
+}
+
 static void *watcher_thread(void *arg)
 {
     char buffer[BUF_LEN];
@@ -228,7 +235,10 @@ static void *watcher_thread(void *arg)
                 if (path) {
                     log_event(path, event->name, event->mask);
                     
-                    if (event->mask & IN_ISDIR) {
+                    if (event->mask & (IN_UNMOUNT | IN_DELETE_SELF)) {
+                        fprintf(stderr, "Device unmounted or deleted: %s\n", path);
+                        handle_device_removal(path);
+                    } else if (event->mask & IN_ISDIR) {
                         char full_path[PATH_MAX];
                         snprintf(full_path, sizeof(full_path), "%s/%s", 
                                 path, event->name);
@@ -239,7 +249,7 @@ static void *watcher_thread(void *arg)
                             need_rescan = 1;
                         } else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
                             fprintf(stderr, "Directory removed: %s\n", full_path);
-                            need_rescan = 1;
+                            handle_device_removal(full_path);
                         }
                     } else if (event->mask & (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE)) {
                         need_rescan = 1;

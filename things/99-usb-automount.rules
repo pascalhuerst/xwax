@@ -1,0 +1,5 @@
+# Mount USB drives when inserted
+ACTION=="add", SUBSYSTEMS=="usb", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_LABEL}!="", RUN{program}+="/bin/sh -c '/usr/bin/systemd-mount --no-block --automount=yes --collect \$devnode /media/%E{ID_FS_LABEL}'"
+
+# Handle USB drive removal
+ACTION=="remove", SUBSYSTEMS=="usb", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_LABEL}!="", RUN{program}+="/bin/sh -c 'systemctl stop media-%E{ID_FS_LABEL}.automount; systemctl stop media-%E{ID_FS_LABEL}.mount; sync; /usr/bin/umount -lf /media/%E{ID_FS_LABEL} 2>/dev/null; sleep 0.5; rm -rf /media/%E{ID_FS_LABEL} 2>/dev/null'"

@@ -1,0 +1,23 @@
+[Unit]
+Description=XWax Audio Player
+After=network.target sound.target media-*.mount
+Requires=media-*.mount
+
+[Service]
+ExecStart=/home/paso/bin/xwax --geometry 800x480 --no-decor --crate /media --timecode serato_2a --phono --alsa plughw:sndrpihifiberry
+User=paso
+Group=paso
+WorkingDirectory=/home/paso
+Environment=DISPLAY=:0
+Restart=on-failure
+RestartSec=3
+
+# Real-time priority settings
+LimitRTPRIO=infinity
+LimitMEMLOCK=infinity
+Nice=-20
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=99
+
+[Install]
+WantedBy=multi-user.target

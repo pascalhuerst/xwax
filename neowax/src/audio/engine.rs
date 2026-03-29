@@ -16,10 +16,6 @@ pub enum TrackCommand {
 const MONITOR_SIZE: i32 = 128;
 /// Update monitor data every N periods (reduces realtime thread overhead)
 const MONITOR_UPDATE_INTERVAL: u32 = 8;
-/// Number of consecutive periods with a valid position needed to commit to a side
-const DETECT_CONFIDENCE: u32 = 50;
-/// Number of consecutive periods without valid position before re-detecting
-const SIGNAL_LOST_PERIODS: u32 = 100;
 
 /// Shared state between the realtime audio thread and the main/UI thread.
 /// Atomics for scalars, Mutex for monitor buffer (audio thread uses try_lock).
@@ -38,8 +34,6 @@ pub struct DeckState {
     pub running: AtomicBool,
     /// Spinner monitor data (written by audio thread via try_lock)
     pub monitor: Mutex<Vec<u8>>,
-    /// Detected timecode name (set once during auto-detection)
-    pub timecode_name: Mutex<String>,
 }
 
 impl DeckState {
@@ -52,7 +46,6 @@ impl DeckState {
             valid_counter: AtomicU32::new(0),
             running: AtomicBool::new(false),
             monitor: Mutex::new(Vec::new()),
-            timecode_name: Mutex::new(String::new()),
         }
     }
 
@@ -185,35 +178,12 @@ fn run_realtime_loop(
     // Start capture immediately
     input_pcm.start()?;
 
-    // Initialize timecoder(s) — auto-detect side for Serato
-    let auto_detect = timecode_name == "serato_2";
-    let mut timecoder: Timecoder;
-    let mut alt_timecoder: Option<Timecoder> = None;
-    let mut detecting = false;
-    let mut signal_lost_count: u32 = 0;
-    let mut detect_a_score: u32 = 0;
-    let mut detect_b_score: u32 = 0;
-
-    if auto_detect {
-        tracing::info!("Auto-detecting Serato side (building LUTs for both A and B)...");
-        let def_a = TimecodeDef::find_definition("serato_2a").unwrap();
-        let def_b = TimecodeDef::find_definition("serato_2b").unwrap();
-        timecoder = Timecoder::new(def_a, speed, sample_rate, phono);
-        timecoder.monitor_init(MONITOR_SIZE).ok();
-        let mut tc_b = Timecoder::new(def_b, speed, sample_rate, phono);
-        tc_b.monitor_init(MONITOR_SIZE).ok();
-        alt_timecoder = Some(tc_b);
-        detecting = true;
-    } else {
-        tracing::info!("Building timecode LUT for '{}'...", timecode_name);
-        let def = TimecodeDef::find_definition(timecode_name)
-            .ok_or_else(|| anyhow::anyhow!("Unknown timecode: {}", timecode_name))?;
-        timecoder = Timecoder::new(def, speed, sample_rate, phono);
-        timecoder.monitor_init(MONITOR_SIZE).ok();
-        if let Ok(mut name) = state.timecode_name.lock() {
-            *name = timecode_name.to_string();
-        }
-    }
+    // Initialize timecoder
+    tracing::info!("Building timecode LUT for '{}'...", timecode_name);
+    let def = TimecodeDef::find_definition(timecode_name)
+        .ok_or_else(|| anyhow::anyhow!("Unknown timecode: {}", timecode_name))?;
+    let mut timecoder = Timecoder::new(def, speed, sample_rate, phono);
+    timecoder.monitor_init(MONITOR_SIZE).ok();
 
     // Initialize player
     let mut player = Player::new(sample_rate);
@@ -253,64 +223,8 @@ fn run_realtime_loop(
             Ok(frames) => {
                 let n = frames as usize;
 
-                // Feed audio to timecoder(s)
+                // Feed captured audio to timecoder (extracts position + pitch)
                 timecoder.submit(&capture_buf[..n * 2]);
-
-                if let Some(ref mut alt_tc) = &mut alt_timecoder {
-                    if detecting {
-                        // Detection mode: feed both, count successful position lookups
-                        alt_tc.submit(&capture_buf[..n * 2]);
-
-                        if timecoder.get_position().is_some() {
-                            detect_a_score += 1;
-                        } else {
-                            detect_a_score = 0;
-                        }
-                        if alt_tc.get_position().is_some() {
-                            detect_b_score += 1;
-                        } else {
-                            detect_b_score = 0;
-                        }
-
-                        if detect_a_score >= DETECT_CONFIDENCE
-                            || detect_b_score >= DETECT_CONFIDENCE
-                        {
-                            if detect_b_score > detect_a_score {
-                                std::mem::swap(&mut timecoder, alt_tc);
-                                tracing::info!("Detected: Serato 2nd Ed., side B");
-                                if let Ok(mut name) = state.timecode_name.lock() {
-                                    *name = "serato_2b".to_string();
-                                }
-                            } else {
-                                tracing::info!("Detected: Serato 2nd Ed., side A");
-                                if let Ok(mut name) = state.timecode_name.lock() {
-                                    *name = "serato_2a".to_string();
-                                }
-                            }
-                            detecting = false;
-                            signal_lost_count = 0;
-                            detect_a_score = 0;
-                            detect_b_score = 0;
-                        }
-                    } else {
-                        // Normal operation: monitor for signal loss (needle lifted)
-                        if timecoder.get_position().is_none() {
-                            signal_lost_count += 1;
-                        } else {
-                            signal_lost_count = 0;
-                        }
-
-                        if signal_lost_count > SIGNAL_LOST_PERIODS {
-                            tracing::info!("Signal lost, re-entering side detection...");
-                            timecoder.reset();
-                            alt_tc.reset();
-                            detecting = true;
-                            signal_lost_count = 0;
-                            detect_a_score = 0;
-                            detect_b_score = 0;
-                        }
-                    }
-                }
 
                 // Generate resampled output from the loaded track
                 player.collect(&mut playback_buf[..n * 2], n, &timecoder);
@@ -357,7 +271,8 @@ fn run_realtime_loop(
             }
             Err(e) if e.errno() == libc::EPIPE => {
                 tracing::warn!("Capture overrun, recovering");
-                input_pcm.try_recover(e, false)?;
+                input_pcm.prepare()?;
+                input_pcm.start()?;
             }
             Err(e) => return Err(e.into()),
         }

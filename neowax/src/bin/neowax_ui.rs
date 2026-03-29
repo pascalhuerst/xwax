@@ -30,8 +30,8 @@ struct Args {
     #[arg(short, long, default_value_t = 48000)]
     sample_rate: u32,
 
-    /// Timecode format (use "serato_2" for auto-detect side A/B)
-    #[arg(short, long, default_value = "serato_2")]
+    /// Timecode format
+    #[arg(short, long, default_value = "serato_2a")]
     timecode: String,
 
     /// Directory to scan for audio files
@@ -277,7 +277,8 @@ impl NeowaxApp {
 
         let elapsed = self.deck_state.get_elapsed();
         if elapsed.is_finite() && elapsed >= 0.0 {
-            self.waveform.set_position(elapsed);
+            self.waveform
+                .set_position(std::time::Duration::from_secs_f64(elapsed));
         }
     }
 
@@ -395,32 +396,14 @@ impl NeowaxApp {
         // Waveform fills remaining vertical space
         self.waveform.show(ui);
 
-        // Bottom bar: timecode name (left) | pitch (right)
-        ui.horizontal(|ui| {
-            let tc_name = self
-                .deck_state
-                .timecode_name
-                .lock()
-                .ok()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.clone())
-                .unwrap_or_default();
-            if !tc_name.is_empty() {
-                ui.label(
-                    RichText::new(&tc_name)
-                        .color(Color32::from_rgb(100, 100, 100))
-                        .size(12.0)
-                        .monospace(),
-                );
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(format!("{:+.1}%", (pitch - 1.0) * 100.0))
-                        .color(Color32::from_rgb(140, 140, 140))
-                        .size(12.0)
-                        .monospace(),
-                );
-            });
+        // Bottom bar: pitch
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!("{:+.1}%", (pitch - 1.0) * 100.0))
+                    .color(Color32::from_rgb(140, 140, 140))
+                    .size(12.0)
+                    .monospace(),
+            );
         });
     }
 

@@ -1,4 +1,5 @@
 use egui::{epaint::Mesh, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
+use std::time::Duration;
 
 const OVERVIEW_HEIGHT: f32 = 28.0;
 const DETAIL_HEIGHT: f32 = 100.0;
@@ -8,20 +9,14 @@ const BACKGROUND_COLOR: Color32 = Color32::from_rgb(12, 12, 18);
 const GRIDLINE_COLOR: Color32 = Color32::from_rgb(30, 30, 40);
 const GAP: f32 = 2.0;
 
-/// Smoothing factor for display position (0.0 = no movement, 1.0 = snap to engine).
-/// 0.3 gives ~2-frame smoothing at 60fps, removing jitter without visible lag.
-const SMOOTHING: f64 = 0.3;
-
 /// Pre-computed min/max at power-of-2 block sizes for fast waveform drawing.
 struct WaveformMipmap {
-    /// levels[k] has block size 2^(k+1). Each entry is (min, max).
     levels: Vec<Vec<(f32, f32)>>,
 }
 
 impl WaveformMipmap {
     fn build(samples: &[f32]) -> Self {
         let mut levels = Vec::new();
-        // Level 0: pairs of raw samples (block size 2)
         let mut prev: Vec<(f32, f32)> = samples
             .chunks(2)
             .map(|c| {
@@ -35,7 +30,6 @@ impl WaveformMipmap {
             })
             .collect();
         levels.push(prev.clone());
-        // Successive levels: each doubles the block size
         while prev.len() > 1 {
             prev = prev
                 .chunks(2)
@@ -52,13 +46,11 @@ impl WaveformMipmap {
         WaveformMipmap { levels }
     }
 
-    /// Query min/max over a sample range using the appropriate mip level.
     fn query_range(&self, start: usize, end: usize, samples: &[f32]) -> (f32, f32) {
         if start >= end {
             return (0.0, 0.0);
         }
         let range_len = end - start;
-        // For very small ranges, scan directly
         if range_len < 8 {
             let mut mn = 0.0f32;
             let mut mx = 0.0f32;
@@ -70,8 +62,6 @@ impl WaveformMipmap {
             return (mn, mx);
         }
 
-        // Pick mip level: block_size should be <= range_len / 2
-        // level k has block_size = 2^(k+1)
         let target_block = range_len / 2;
         let level = if target_block >= 2 {
             (target_block as f64).log2().floor() as usize - 1
@@ -99,20 +89,14 @@ impl WaveformMipmap {
 pub struct WaveformWidget {
     samples: Vec<f32>,
     sample_rate: u32,
-    duration: f64,
+    duration: Duration,
+    current_position: Duration,
     mipmap: Option<MipmapHolder>,
-
-    // Frequency band data for colored waveform (absolute amplitude per sample)
     band_low: Vec<f32>,
     band_mid: Vec<f32>,
     band_high: Vec<f32>,
-
-    // Position tracking
-    engine_position: f64,
-    display_position: f64,
 }
 
-// WaveformMipmap doesn't implement Debug, so wrap it
 struct MipmapHolder(WaveformMipmap);
 impl std::fmt::Debug for MipmapHolder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -127,13 +111,12 @@ impl WaveformWidget {
         Self {
             samples: Vec::new(),
             sample_rate,
-            duration: 0.0,
+            duration: Duration::from_secs(0),
+            current_position: Duration::from_secs(0),
             mipmap: None,
             band_low: Vec::new(),
             band_mid: Vec::new(),
             band_high: Vec::new(),
-            engine_position: 0.0,
-            display_position: 0.0,
         }
     }
 
@@ -142,7 +125,8 @@ impl WaveformWidget {
         samples: Vec<f32>,
         bands: Option<(Vec<f32>, Vec<f32>, Vec<f32>)>,
     ) {
-        self.duration = samples.len() as f64 / self.sample_rate as f64;
+        self.duration =
+            Duration::from_secs_f32(samples.len() as f32 / self.sample_rate as f32);
         self.mipmap = if samples.is_empty() {
             None
         } else {
@@ -160,30 +144,17 @@ impl WaveformWidget {
         self.samples = samples;
     }
 
-    pub fn set_position(&mut self, position: f64) {
+    pub fn set_position(&mut self, position: Duration) {
         if position > self.duration {
             return;
         }
-        self.engine_position = position;
-    }
-
-    /// Smooth the display position toward the engine position.
-    /// Simple exponential filter — no clock dependency, no drift.
-    fn update_display_position(&mut self) {
-        let error = self.engine_position - self.display_position;
-        if error.abs() > 0.5 {
-            // Large jump (seek, needle repositioned): snap immediately
-            self.display_position = self.engine_position;
-        } else {
-            self.display_position += error * SMOOTHING;
-        }
-        self.display_position = self.display_position.clamp(0.0, self.duration);
+        self.current_position = position;
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> Response {
         let available_width = ui.available_width();
-        self.update_display_position();
-        let current_pos = self.display_position;
+        let current_pos = self.current_position.as_secs_f64();
+        let duration_secs = self.duration.as_secs_f64();
 
         // Overview waveform
         let (overview_rect, overview_response) = ui.allocate_exact_size(
@@ -193,8 +164,8 @@ impl WaveformWidget {
         self.draw_waveform(ui, &overview_rect, None, true);
 
         // Position cursor on overview
-        if self.duration > 0.0 {
-            let pos_ratio = current_pos / self.duration;
+        if duration_secs > 0.0 {
+            let pos_ratio = current_pos / duration_secs;
             let x = overview_rect.left() + overview_rect.width() * pos_ratio as f32;
             ui.painter().line_segment(
                 [
@@ -207,14 +178,14 @@ impl WaveformWidget {
 
         ui.add_space(GAP);
 
-        // Detail view: compute viewport centered on current position
+        // Detail view centered on current position
         let half_view = DETAIL_VIEW_SECONDS / 2.0;
         let detail_start = if current_pos > half_view {
             current_pos - half_view
         } else {
             0.0
         }
-        .min((self.duration - DETAIL_VIEW_SECONDS).max(0.0));
+        .min((duration_secs - DETAIL_VIEW_SECONDS).max(0.0));
 
         let (detail_rect, _detail_response) = ui.allocate_exact_size(
             Vec2::new(available_width, DETAIL_HEIGHT),
@@ -250,10 +221,8 @@ impl WaveformWidget {
     ) {
         let painter = ui.painter();
 
-        // Background
         painter.rect_filled(*rect, 0.0, BACKGROUND_COLOR);
 
-        // Center line
         let center_y = rect.center().y;
         painter.line_segment(
             [
@@ -263,7 +232,6 @@ impl WaveformWidget {
             Stroke::new(1.0, GRIDLINE_COLOR),
         );
 
-        // Horizontal grid lines at 25% and 75%
         if !is_overview {
             for frac in [0.25, 0.75] {
                 let y = rect.top() + rect.height() * frac;
@@ -281,7 +249,6 @@ impl WaveformWidget {
         let total_samples = self.samples.len();
         let width = rect.width() as f64;
 
-        // Compute floating-point sample boundaries for sub-pixel precision
         let (start_sample_f, samples_per_pixel) = if let Some((start_secs, duration_secs)) =
             view_range
         {
@@ -299,7 +266,6 @@ impl WaveformWidget {
         let use_mipmap = self.mipmap.is_some() && samples_per_pixel >= 8.0;
         let col_count = rect.width() as usize;
 
-        // Collect min/max and band color per column
         struct Column {
             min: f32,
             max: f32,
@@ -333,7 +299,6 @@ impl WaveformWidget {
                 (mn, mx)
             };
 
-            // Compute band color for this column
             let color = if has_bands && s_end <= self.band_low.len() {
                 let mut lo = 0.0f32;
                 let mut mi = 0.0f32;
@@ -348,7 +313,6 @@ impl WaveformWidget {
                     let lo_w = lo / total;
                     let mi_w = mi / total;
                     let hi_w = hi / total;
-                    // Low=warm (red/orange), Mid=green, High=cold (blue)
                     let r = ((lo_w * 220.0 + mi_w * 50.0 + hi_w * 40.0) * dim) as u8;
                     let g = ((lo_w * 60.0 + mi_w * 200.0 + hi_w * 80.0) * dim) as u8;
                     let b = ((lo_w * 30.0 + mi_w * 80.0 + hi_w * 220.0) * dim) as u8;
@@ -396,7 +360,7 @@ impl WaveformWidget {
 
         painter.add(Shape::mesh(mesh));
 
-        // Draw contour lines (brighter version of per-column colors)
+        // Contour lines
         let top_points: Vec<Pos2> = columns
             .iter()
             .enumerate()

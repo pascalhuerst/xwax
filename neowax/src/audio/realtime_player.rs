@@ -3,9 +3,9 @@ use super::CHANNELS;
 use anyhow::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use symphonia::core::codecs::Decoder;
-use symphonia::core::formats::{FormatReader, Track, SeekMode, SeekTo};
 use symphonia::core::audio::AudioBufferRef;
+use symphonia::core::codecs::Decoder;
+use symphonia::core::formats::{FormatReader, SeekMode, SeekTo, Track};
 use symphonia::core::units::TimeStamp;
 
 pub struct RealtimePlayer {
@@ -39,7 +39,7 @@ impl RealtimePlayer {
     pub fn read_samples(&mut self) -> Result<AudioBuffer> {
         let mut buffer = AudioBuffer::new();
         let current_position = self.position.load(Ordering::SeqCst);
-        
+
         // Check if we've reached the end
         if current_position >= self.total_samples {
             return Ok(buffer);
@@ -56,14 +56,17 @@ impl RealtimePlayer {
                                 // Get the interleaved samples
                                 let planes = audio_buf.planes();
                                 let plane_buf = planes.planes()[0];
-                                
+
                                 // Convert to i16 and add to buffer
                                 for &value in plane_buf.iter() {
                                     buffer.push((value * i16::MAX as f32) as i16);
                                 }
-                                
+
                                 // Update position
-                                self.position.fetch_add(plane_buf.len() as u64 / CHANNELS as u64, Ordering::SeqCst);
+                                self.position.fetch_add(
+                                    plane_buf.len() as u64 / CHANNELS as u64,
+                                    Ordering::SeqCst,
+                                );
                             }
                             _ => {
                                 tracing::warn!("Unsupported audio format");
@@ -79,25 +82,28 @@ impl RealtimePlayer {
                 tracing::error!("Failed to read packet: {}", e);
             }
         }
-        
+
         Ok(buffer)
     }
 
     pub fn seek(&mut self, position: u64) -> Result<()> {
         // Convert position to timestamp
         let ts = TimeStamp::from(position);
-        
+
         // Seek in the reader with accurate seeking mode
         self.reader.seek(
             SeekMode::Accurate,
-            SeekTo::TimeStamp { ts, track_id: self.track.id }
+            SeekTo::TimeStamp {
+                ts,
+                track_id: self.track.id,
+            },
         )?;
-        
+
         // Reset decoder state
         self.decoder.reset();
-        
+
         // Update position
         self.position.store(position, Ordering::SeqCst);
         Ok(())
     }
-} 
+}

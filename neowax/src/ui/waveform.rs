@@ -1,13 +1,12 @@
 use egui::{epaint::Mesh, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 use std::time::Duration;
 
-const OVERVIEW_HEIGHT: f32 = 28.0;
-const DETAIL_HEIGHT: f32 = 100.0;
-const DETAIL_VIEW_SECONDS: f64 = 4.0;
+const OVERVIEW_HEIGHT: f32 = 56.0;
+const WAVEFORM_FILL: Color32 = Color32::from_rgb(30, 80, 160);
+const WAVEFORM_EDGE: Color32 = Color32::from_rgb(80, 170, 255);
 const CURSOR_COLOR: Color32 = Color32::from_rgb(255, 255, 255);
 const BACKGROUND_COLOR: Color32 = Color32::from_rgb(12, 12, 18);
 const GRIDLINE_COLOR: Color32 = Color32::from_rgb(30, 30, 40);
-const GAP: f32 = 2.0;
 
 /// Pre-computed min/max at power-of-2 block sizes for fast waveform drawing.
 struct WaveformMipmap {
@@ -176,39 +175,6 @@ impl WaveformWidget {
             );
         }
 
-        ui.add_space(GAP);
-
-        // Detail view centered on current position
-        let half_view = DETAIL_VIEW_SECONDS / 2.0;
-        let detail_start = if current_pos > half_view {
-            current_pos - half_view
-        } else {
-            0.0
-        }
-        .min((duration_secs - DETAIL_VIEW_SECONDS).max(0.0));
-
-        let (detail_rect, _detail_response) = ui.allocate_exact_size(
-            Vec2::new(available_width, DETAIL_HEIGHT),
-            Sense::hover(),
-        );
-        self.draw_waveform(
-            ui,
-            &detail_rect,
-            Some((detail_start, DETAIL_VIEW_SECONDS)),
-            false,
-        );
-
-        // Position cursor on detail
-        let detail_pos_ratio = (current_pos - detail_start) / DETAIL_VIEW_SECONDS;
-        let x = detail_rect.left() + detail_rect.width() * detail_pos_ratio as f32;
-        ui.painter().line_segment(
-            [
-                Pos2::new(x, detail_rect.top()),
-                Pos2::new(x, detail_rect.bottom()),
-            ],
-            Stroke::new(1.5, CURSOR_COLOR),
-        );
-
         overview_response
     }
 
@@ -260,19 +226,11 @@ impl WaveformWidget {
         };
 
         let half_height = rect.height() / 2.0;
-        let dim = if is_overview { 0.5f32 } else { 1.0 };
-        let has_bands = !self.band_low.is_empty();
 
         let use_mipmap = self.mipmap.is_some() && samples_per_pixel >= 8.0;
         let col_count = rect.width() as usize;
 
-        struct Column {
-            min: f32,
-            max: f32,
-            color: Color32,
-        }
-
-        let mut columns: Vec<Column> = Vec::with_capacity(col_count);
+        let mut columns: Vec<(f32, f32)> = Vec::with_capacity(col_count);
         for x in 0..col_count {
             let s_start_f = start_sample_f + x as f64 * samples_per_pixel;
             let s_end_f = s_start_f + samples_per_pixel;
@@ -299,40 +257,7 @@ impl WaveformWidget {
                 (mn, mx)
             };
 
-            let color = if has_bands && s_end <= self.band_low.len() {
-                let mut lo = 0.0f32;
-                let mut mi = 0.0f32;
-                let mut hi = 0.0f32;
-                for i in s_start..s_end {
-                    lo += self.band_low[i];
-                    mi += self.band_mid[i];
-                    hi += self.band_high[i];
-                }
-                let total = lo + mi + hi;
-                if total > 0.0 {
-                    let lo_w = lo / total;
-                    let mi_w = mi / total;
-                    let hi_w = hi / total;
-                    let r = ((lo_w * 220.0 + mi_w * 50.0 + hi_w * 40.0) * dim) as u8;
-                    let g = ((lo_w * 60.0 + mi_w * 200.0 + hi_w * 80.0) * dim) as u8;
-                    let b = ((lo_w * 30.0 + mi_w * 80.0 + hi_w * 220.0) * dim) as u8;
-                    Color32::from_rgb(r, g, b)
-                } else {
-                    Color32::from_rgb(
-                        (30.0 * dim) as u8,
-                        (80.0 * dim) as u8,
-                        (160.0 * dim) as u8,
-                    )
-                }
-            } else {
-                Color32::from_rgb(
-                    (30.0 * dim) as u8,
-                    (80.0 * dim) as u8,
-                    (160.0 * dim) as u8,
-                )
-            };
-
-            columns.push(Column { min, max, color });
+            columns.push((min, max));
         }
 
         if columns.is_empty() {
@@ -344,12 +269,12 @@ impl WaveformWidget {
         mesh.reserve_triangles(columns.len() * 2);
         mesh.reserve_vertices(columns.len() * 2);
 
-        for (x, col) in columns.iter().enumerate() {
+        for (x, &(min, max)) in columns.iter().enumerate() {
             let px = rect.left() + x as f32;
-            let y_top = center_y - col.max * half_height;
-            let y_bot = center_y - col.min * half_height;
-            mesh.colored_vertex(Pos2::new(px, y_top), col.color);
-            mesh.colored_vertex(Pos2::new(px, y_bot), col.color);
+            let y_top = center_y - max * half_height;
+            let y_bot = center_y - min * half_height;
+            mesh.colored_vertex(Pos2::new(px, y_top), WAVEFORM_FILL);
+            mesh.colored_vertex(Pos2::new(px, y_bot), WAVEFORM_FILL);
         }
 
         for x in 0..columns.len() - 1 {
@@ -364,20 +289,15 @@ impl WaveformWidget {
         let top_points: Vec<Pos2> = columns
             .iter()
             .enumerate()
-            .map(|(x, col)| Pos2::new(rect.left() + x as f32, center_y - col.max * half_height))
+            .map(|(x, &(_, max))| Pos2::new(rect.left() + x as f32, center_y - max * half_height))
             .collect();
         let bot_points: Vec<Pos2> = columns
             .iter()
             .enumerate()
-            .map(|(x, col)| Pos2::new(rect.left() + x as f32, center_y - col.min * half_height))
+            .map(|(x, &(min, _))| Pos2::new(rect.left() + x as f32, center_y - min * half_height))
             .collect();
 
-        let edge_color = if is_overview {
-            Color32::from_rgb(60, 100, 160)
-        } else {
-            Color32::from_rgb(140, 180, 220)
-        };
-        painter.add(Shape::line(top_points, Stroke::new(1.0, edge_color)));
-        painter.add(Shape::line(bot_points, Stroke::new(1.0, edge_color)));
+        painter.add(Shape::line(top_points, Stroke::new(1.0, WAVEFORM_EDGE)));
+        painter.add(Shape::line(bot_points, Stroke::new(1.0, WAVEFORM_EDGE)));
     }
 }

@@ -112,6 +112,9 @@ struct NeowaxApp {
     // Track name scroll state (marquee for long names)
     title_scroll_offset: f32,
 
+    // Pitch history for calibration plot (ring buffer)
+    pitch_history: Vec<f32>,
+
     // Status flash message
     status_message: String,
     status_timer: f64,
@@ -186,6 +189,7 @@ impl NeowaxApp {
             track_duration: 0.0,
             signal_quality: 0.0,
             title_scroll_offset: 0.0,
+            pitch_history: Vec::with_capacity(600),
             timecode_resolution,
             status_message: String::new(),
             status_timer: 0.0,
@@ -279,6 +283,15 @@ impl NeowaxApp {
         if elapsed.is_finite() && elapsed >= 0.0 {
             self.waveform
                 .set_position(std::time::Duration::from_secs_f64(elapsed));
+        }
+
+        // Record pitch history (~10s window at 60fps)
+        let vinyl_pitch = self.deck_state.get_vinyl_pitch() as f32;
+        if vinyl_pitch.is_finite() {
+            self.pitch_history.push(vinyl_pitch);
+            if self.pitch_history.len() > 600 {
+                self.pitch_history.remove(0);
+            }
         }
     }
 
@@ -396,15 +409,89 @@ impl NeowaxApp {
         // Waveform fills remaining vertical space
         self.waveform.show(ui);
 
-        // Bottom bar: pitch
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(format!("{:+.1}%", (pitch - 1.0) * 100.0))
-                    .color(Color32::from_rgb(140, 140, 140))
-                    .size(12.0)
-                    .monospace(),
+        // Pitch history plot
+        ui.add_space(SPACER);
+        self.draw_pitch_plot(ui);
+    }
+
+    fn draw_pitch_plot(&self, ui: &mut egui::Ui) {
+        let width = ui.available_width();
+        let height = ui.available_height();
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+
+        let painter = ui.painter();
+        painter.rect_filled(rect, 0.0, Color32::from_rgb(12, 12, 18));
+
+        // Auto-range: find min/max of visible data, add small margin
+        let mut min_p = 1.0f32;
+        let mut max_p = 1.0f32;
+        for &p in &self.pitch_history {
+            if p.is_finite() && p > 0.1 {
+                min_p = min_p.min(p);
+                max_p = max_p.max(p);
+            }
+        }
+        // Ensure at least ±0.2% so the plot isn't a flat line
+        let margin = ((max_p - min_p) * 0.1).max(0.002);
+        let plot_min = min_p - margin;
+        let plot_max = max_p + margin;
+        let plot_range = plot_max - plot_min;
+        let pitch_to_y =
+            |p: f32| rect.bottom() - ((p - plot_min) / plot_range) * rect.height();
+
+        // 0% reference line (pitch = 1.0), always drawn if in range
+        if plot_min < 1.0 && 1.0 < plot_max {
+            let y = pitch_to_y(1.0);
+            painter.line_segment(
+                [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                egui::Stroke::new(1.0, Color32::from_rgb(50, 50, 60)),
             );
-        });
+            painter.text(
+                egui::pos2(rect.left() + 4.0, y - 2.0),
+                egui::Align2::LEFT_BOTTOM,
+                "0%",
+                egui::FontId::monospace(9.0),
+                Color32::from_rgb(80, 80, 90),
+            );
+        }
+
+        // Draw pitch trace
+        let n = self.pitch_history.len();
+        if n < 2 {
+            return;
+        }
+
+        let w = rect.width();
+        let mut points: Vec<egui::Pos2> = Vec::with_capacity(n);
+        for (i, &p) in self.pitch_history.iter().enumerate() {
+            if !p.is_finite() || p < 0.1 {
+                continue;
+            }
+            let x = rect.left() + w * (i as f32 / (n - 1).max(1) as f32);
+            let y = pitch_to_y(p);
+            points.push(egui::pos2(x, y));
+        }
+
+        if points.len() >= 2 {
+            painter.add(egui::Shape::line(
+                points,
+                egui::Stroke::new(1.5, Color32::from_rgb(60, 200, 60)),
+            ));
+        }
+
+        // Current value
+        if let Some(&last) = self.pitch_history.last() {
+            if last.is_finite() && last > 0.1 {
+                painter.text(
+                    egui::pos2(rect.right() - 4.0, rect.top() + 2.0),
+                    egui::Align2::RIGHT_TOP,
+                    format!("{:+.2}%", (last - 1.0) * 100.0),
+                    egui::FontId::monospace(12.0),
+                    Color32::from_rgb(60, 200, 60),
+                );
+            }
+        }
     }
 
     /// Toggle folder at current selection and rebuild the flat list.

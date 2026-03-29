@@ -276,9 +276,8 @@ impl NeowaxApp {
         }
 
         let elapsed = self.deck_state.get_elapsed();
-        let pitch = self.deck_state.get_pitch();
         if elapsed.is_finite() && elapsed >= 0.0 {
-            self.waveform.set_position(elapsed, pitch);
+            self.waveform.set_position(elapsed);
         }
     }
 

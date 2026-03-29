@@ -1,5 +1,4 @@
 use egui::{epaint::Mesh, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
-use std::time::Instant;
 
 const OVERVIEW_HEIGHT: f32 = 28.0;
 const DETAIL_HEIGHT: f32 = 100.0;
@@ -9,12 +8,9 @@ const BACKGROUND_COLOR: Color32 = Color32::from_rgb(12, 12, 18);
 const GRIDLINE_COLOR: Color32 = Color32::from_rgb(30, 30, 40);
 const GAP: f32 = 2.0;
 
-/// Gentle drift correction during playback — smooth visuals.
-const DRIFT_CORRECTION: f64 = 0.03;
-/// When stopped/cueing, track the engine position tightly for accuracy.
-const CUE_CORRECTION: f64 = 0.5;
-/// Pitch below this = "stopped" (use tight tracking for cueing)
-const STOPPED_PITCH: f64 = 0.05;
+/// Smoothing factor for display position (0.0 = no movement, 1.0 = snap to engine).
+/// 0.3 gives ~2-frame smoothing at 60fps, removing jitter without visible lag.
+const SMOOTHING: f64 = 0.3;
 
 /// Pre-computed min/max at power-of-2 block sizes for fast waveform drawing.
 struct WaveformMipmap {
@@ -111,11 +107,9 @@ pub struct WaveformWidget {
     band_mid: Vec<f32>,
     band_high: Vec<f32>,
 
-    // Smooth position tracking
+    // Position tracking
     engine_position: f64,
-    engine_pitch: f64,
     display_position: f64,
-    last_frame_time: Instant,
 }
 
 // WaveformMipmap doesn't implement Debug, so wrap it
@@ -139,9 +133,7 @@ impl WaveformWidget {
             band_mid: Vec::new(),
             band_high: Vec::new(),
             engine_position: 0.0,
-            engine_pitch: 0.0,
             display_position: 0.0,
-            last_frame_time: Instant::now(),
         }
     }
 
@@ -168,45 +160,29 @@ impl WaveformWidget {
         self.samples = samples;
     }
 
-    pub fn set_position(&mut self, position: f64, pitch: f64) {
+    pub fn set_position(&mut self, position: f64) {
         if position > self.duration {
             return;
         }
         self.engine_position = position;
-        self.engine_pitch = pitch;
     }
 
-    /// Advance the display position smoothly each frame.
-    /// Integrates pitch for smooth movement, with gentle drift correction.
-    /// When stopped (cueing), tracks the engine position tightly for accuracy.
-    fn advance_display_position(&mut self) {
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_frame_time).as_secs_f64();
-        self.last_frame_time = now;
-        let dt = dt.min(0.05);
-
-        // Integrate pitch for smooth movement
-        self.display_position += self.engine_pitch * dt;
-
+    /// Smooth the display position toward the engine position.
+    /// Simple exponential filter — no clock dependency, no drift.
+    fn update_display_position(&mut self) {
         let error = self.engine_position - self.display_position;
-
         if error.abs() > 0.5 {
             // Large jump (seek, needle repositioned): snap immediately
             self.display_position = self.engine_position;
-        } else if self.engine_pitch.abs() < STOPPED_PITCH {
-            // Stopped or cueing: track tightly for precise positioning
-            self.display_position += error * CUE_CORRECTION;
         } else {
-            // Playing: gentle drift correction for smooth visuals
-            self.display_position += error * DRIFT_CORRECTION;
+            self.display_position += error * SMOOTHING;
         }
-
         self.display_position = self.display_position.clamp(0.0, self.duration);
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> Response {
         let available_width = ui.available_width();
-        self.advance_display_position();
+        self.update_display_position();
         let current_pos = self.display_position;
 
         // Overview waveform

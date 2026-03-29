@@ -201,6 +201,8 @@ impl NeowaxApp {
     }
 
     fn rescan_library(&mut self) {
+        // Touch the directory to trigger systemd automount if needed
+        let _ = std::fs::read_dir(&self.library_dir);
         self.library_tree = library::scan_directory(&self.library_dir);
         self.library_flat = library::flatten_tree(&self.library_tree);
         self.selected_index = 0;

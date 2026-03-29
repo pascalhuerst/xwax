@@ -13,7 +13,7 @@ alsa = "0.9.1"
 anyhow = "1.0.97"
 libc = "0.2.171"
 ringbuf = "0.4.8"
-symphonia = { version = "0.5.3", features = ["mp3", "wav", "flac", "aac", "isomp4", "ogg", "vorbis"] }
+symphonia = { version = "0.5.3", features = ["mp3", "wav", "flac", "aac", "isomp4", "ogg", "vorbis", "aiff", "pcm"] }
 num-traits = "0.2.19"
 byteorder = "1.5.0"
 clap = { version = "4.5.1", features = ["derive"] }

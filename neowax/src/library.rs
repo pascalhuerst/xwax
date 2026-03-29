@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "ogg", "aac", "m4a", "opus"];
+const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "ogg", "aac", "m4a", "opus", "aiff", "aif"];
 
 /// A node in the library tree: either a folder (with children) or an audio file.
 pub enum LibraryNode {
